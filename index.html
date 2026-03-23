@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Literature Tools Catalog</title>
+    <!-- Use sql.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        .search-container {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        input[type="text"] {
+            padding: 10px;
+            font-size: 16px;
+            width: 100%;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        #loading {
+            margin-top: 20px;
+            font-weight: bold;
+            color: #555;
+        }
+        #error {
+            margin-top: 20px;
+            font-weight: bold;
+            color: red;
+        }
+        #results-info {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Literature Tools Catalog</h1>
+    <p>Search by PMID, PMCID, or DOI. This database is loaded on demand and queried directly in your browser using WebAssembly.</p>
+
+    <div class="search-container">
+        <input type="text" id="searchInput" placeholder="Enter PMID, PMCID, or DOI..." disabled>
+        <button id="searchButton" onclick="performSearch()" disabled>Search</button>
+    </div>
+
+    <div id="loading">Initializing database, please wait...</div>
+    <div id="error"></div>
+    <div id="results-info"></div>
+
+    <table id="resultsTable" style="display: none;">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>PMID</th>
+                <th>PMCID</th>
+                <th>DOI</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Results will be injected here -->
+        </tbody>
+    </table>
+
+    <script>
+        let db;
+
+        async function initDB() {
+            const loadingIndicator = document.getElementById('loading');
+            const errorIndicator = document.getElementById('error');
+            const searchInput = document.getElementById('searchInput');
+            const searchButton = document.getElementById('searchButton');
+
+            try {
+                // Initialize sql.js
+                const SQL = await initSqlJs({
+                    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+                });
+
+                // Fetch the SQLite database file
+                loadingIndicator.innerText = "Downloading database... (this might take a moment depending on the size)";
+                const response = await fetch('catalog.db');
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch database: ${response.statusText}`);
+                }
+
+                const buffer = await response.arrayBuffer();
+                loadingIndicator.innerText = "Loading database into memory...";
+
+                // Initialize the database
+                db = new SQL.Database(new Uint8Array(buffer));
+
+                // Ready
+                loadingIndicator.style.display = 'none';
+                searchInput.disabled = false;
+                searchButton.disabled = false;
+                searchInput.focus();
+
+                // Initial empty search to show some records
+                performSearch();
+
+            } catch (err) {
+                console.error(err);
+                loadingIndicator.style.display = 'none';
+                errorIndicator.innerText = `Error initializing database: ${err.message}`;
+            }
+        }
+
+        // Allow pressing Enter in the search box
+        document.getElementById("searchInput").addEventListener("keyup", function(event) {
+            if (event.key === "Enter") {
+                performSearch();
+            }
+        });
+
+        function performSearch() {
+            if (!db) return;
+
+            const queryText = document.getElementById('searchInput').value.trim();
+            const tbody = document.querySelector('#resultsTable tbody');
+            const table = document.getElementById('resultsTable');
+            const info = document.getElementById('results-info');
+
+            tbody.innerHTML = ''; // Clear previous results
+            table.style.display = 'none';
+            info.innerText = 'Searching...';
+
+            try {
+                let sqlQuery = "";
+                let stmt;
+                const limit = 50;
+
+                if (queryText === "") {
+                    // Show top N records if no search query
+                    sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature LIMIT ?";
+                    stmt = db.prepare(sqlQuery);
+                    stmt.bind([limit]);
+                } else {
+                    // Search in any column
+                    sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature WHERE pmid LIKE ? OR pmcid LIKE ? OR doi LIKE ? LIMIT ?";
+                    const searchPattern = `%${queryText}%`;
+                    stmt = db.prepare(sqlQuery);
+                    stmt.bind([searchPattern, searchPattern, searchPattern, limit]);
+                }
+
+                let count = 0;
+                while (stmt.step()) {
+                    const row = stmt.getAsObject();
+                    const tr = document.createElement('tr');
+
+                    tr.innerHTML = `
+                        <td>${row.id}</td>
+                        <td>${row.pmid || ''}</td>
+                        <td>${row.pmcid || ''}</td>
+                        <td>${row.doi ? `<a href="${row.doi}" target="_blank">${row.doi}</a>` : ''}</td>
+                    `;
+                    tbody.appendChild(tr);
+                    count++;
+                }
+                stmt.free();
+
+                if (count > 0) {
+                    table.style.display = 'table';
+                    info.innerText = `Showing ${count} results${count === limit ? ' (limited)' : ''}.`;
+                } else {
+                    info.innerText = "No results found.";
+                }
+
+            } catch (err) {
+                console.error(err);
+                info.innerText = `Search error: ${err.message}`;
+            }
+        }
+
+        // Initialize when the page loads
+        window.onload = initDB;
+    </script>
+</body>
+</html>
