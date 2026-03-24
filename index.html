@@ -78,12 +78,40 @@
 
     <div class="search-container">
         <input type="text" id="searchInput" placeholder="Enter PMID, PMCID, or DOI..." disabled>
-        <button id="searchButton" onclick="performSearch()" disabled>Search</button>
+        <button id="searchButton" disabled>Search</button>
     </div>
+
+    <style>
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 15px;
+        }
+        .pagination button {
+            padding: 8px 16px;
+            font-size: 14px;
+            cursor: pointer;
+            background-color: #6c757d;
+        }
+        .pagination button:hover {
+            background-color: #5a6268;
+        }
+        .pagination button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
 
     <div id="loading">Initializing database, please wait...</div>
     <div id="error"></div>
     <div id="results-info"></div>
+
+    <div class="pagination" id="topPagination" style="display: none;">
+        <button id="prevBtnTop" onclick="prevPage()">Previous</button>
+        <span id="pageInfoTop">Page 1</span>
+        <button id="nextBtnTop" onclick="nextPage()">Next</button>
+    </div>
 
     <table id="resultsTable" style="display: none;">
         <thead>
@@ -99,8 +127,18 @@
         </tbody>
     </table>
 
+    <div class="pagination" id="bottomPagination" style="display: none;">
+        <button id="prevBtnBottom" onclick="prevPage()">Previous</button>
+        <span id="pageInfoBottom">Page 1</span>
+        <button id="nextBtnBottom" onclick="nextPage()">Next</button>
+    </div>
+
     <script>
         let db;
+        let currentPage = 1;
+        const pageSize = 50;
+        let totalResults = 0;
+        let currentSearchQuery = "";
 
         async function initDB() {
             const loadingIndicator = document.getElementById('loading');
@@ -146,14 +184,71 @@
         // Allow pressing Enter in the search box
         document.getElementById("searchInput").addEventListener("keyup", function(event) {
             if (event.key === "Enter") {
-                performSearch();
+                // Reset page on new search
+                currentPage = 1;
+                currentSearchQuery = document.getElementById('searchInput').value.trim();
+                executeSearch();
             }
         });
 
-        function performSearch() {
+        // Triggered by the search button
+        document.getElementById("searchButton").onclick = () => {
+            currentPage = 1;
+            currentSearchQuery = document.getElementById('searchInput').value.trim();
+            executeSearch();
+        };
+
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                executeSearch();
+            }
+        }
+
+        function nextPage() {
+            if ((currentPage * pageSize) < totalResults) {
+                currentPage++;
+                executeSearch();
+            }
+        }
+
+        function updatePaginationUI() {
+            const topPagination = document.getElementById('topPagination');
+            const bottomPagination = document.getElementById('bottomPagination');
+            const pageInfoTop = document.getElementById('pageInfoTop');
+            const pageInfoBottom = document.getElementById('pageInfoBottom');
+            const prevBtnTop = document.getElementById('prevBtnTop');
+            const prevBtnBottom = document.getElementById('prevBtnBottom');
+            const nextBtnTop = document.getElementById('nextBtnTop');
+            const nextBtnBottom = document.getElementById('nextBtnBottom');
+
+            if (totalResults > 0) {
+                topPagination.style.display = 'flex';
+                bottomPagination.style.display = 'flex';
+
+                const totalPages = Math.ceil(totalResults / pageSize);
+                const infoText = `Page ${currentPage} of ${totalPages} (${totalResults.toLocaleString()} total entries)`;
+
+                pageInfoTop.innerText = infoText;
+                pageInfoBottom.innerText = infoText;
+
+                const disablePrev = currentPage === 1;
+                const disableNext = currentPage >= totalPages;
+
+                prevBtnTop.disabled = disablePrev;
+                prevBtnBottom.disabled = disablePrev;
+                nextBtnTop.disabled = disableNext;
+                nextBtnBottom.disabled = disableNext;
+            } else {
+                topPagination.style.display = 'none';
+                bottomPagination.style.display = 'none';
+            }
+        }
+
+        // Renamed to executeSearch to clarify it uses existing state
+        function executeSearch() {
             if (!db) return;
 
-            const queryText = document.getElementById('searchInput').value.trim();
             const tbody = document.querySelector('#resultsTable tbody');
             const table = document.getElementById('resultsTable');
             const info = document.getElementById('results-info');
@@ -161,36 +256,72 @@
             tbody.innerHTML = ''; // Clear previous results
             table.style.display = 'none';
             info.innerText = 'Searching...';
+            document.getElementById('topPagination').style.display = 'none';
+            document.getElementById('bottomPagination').style.display = 'none';
 
             try {
                 let sqlQuery = "";
+                let countQuery = "";
                 let stmt;
-                const limit = 50;
+                let countStmt;
+                const offset = (currentPage - 1) * pageSize;
 
-                if (queryText === "") {
-                    // Show top N records if no search query
-                    sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature LIMIT ?";
+                if (currentSearchQuery === "") {
+                    // Total count
+                    countQuery = "SELECT COUNT(*) as count FROM literature";
+                    countStmt = db.prepare(countQuery);
+
+                    // Results
+                    sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature LIMIT ? OFFSET ?";
                     stmt = db.prepare(sqlQuery);
-                    stmt.bind([limit]);
+                    stmt.bind([pageSize, offset]);
                 } else {
-                    // Search in any column
-                    sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature WHERE pmid LIKE ? OR pmcid LIKE ? OR doi LIKE ? LIMIT ?";
-                    const searchPattern = `%${queryText}%`;
+                    const searchPattern = `%${currentSearchQuery}%`;
+
+                    // Total count
+                    countQuery = "SELECT COUNT(*) as count FROM literature WHERE pmid LIKE ? OR pmcid LIKE ? OR doi LIKE ?";
+                    countStmt = db.prepare(countQuery);
+                    countStmt.bind([searchPattern, searchPattern, searchPattern]);
+
+                    // Results
+                    sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature WHERE pmid LIKE ? OR pmcid LIKE ? OR doi LIKE ? LIMIT ? OFFSET ?";
                     stmt = db.prepare(sqlQuery);
-                    stmt.bind([searchPattern, searchPattern, searchPattern, limit]);
+                    stmt.bind([searchPattern, searchPattern, searchPattern, pageSize, offset]);
                 }
+
+                // Execute count
+                if (countStmt.step()) {
+                    totalResults = countStmt.getAsObject().count;
+                }
+                countStmt.free();
 
                 let count = 0;
                 while (stmt.step()) {
                     const row = stmt.getAsObject();
                     const tr = document.createElement('tr');
 
-                    tr.innerHTML = `
-                        <td>${row.id}</td>
-                        <td>${row.pmid || ''}</td>
-                        <td>${row.pmcid || ''}</td>
-                        <td>${row.doi ? `<a href="${row.doi}" target="_blank">${row.doi}</a>` : ''}</td>
-                    `;
+                    const tdId = document.createElement('td');
+                    tdId.textContent = row.id;
+                    tr.appendChild(tdId);
+
+                    const tdPmid = document.createElement('td');
+                    tdPmid.textContent = row.pmid || '';
+                    tr.appendChild(tdPmid);
+
+                    const tdPmcid = document.createElement('td');
+                    tdPmcid.textContent = row.pmcid || '';
+                    tr.appendChild(tdPmcid);
+
+                    const tdDoi = document.createElement('td');
+                    if (row.doi) {
+                        const a = document.createElement('a');
+                        a.href = row.doi;
+                        a.target = '_blank';
+                        a.textContent = row.doi;
+                        tdDoi.appendChild(a);
+                    }
+                    tr.appendChild(tdDoi);
+
                     tbody.appendChild(tr);
                     count++;
                 }
@@ -198,9 +329,14 @@
 
                 if (count > 0) {
                     table.style.display = 'table';
-                    info.innerText = `Showing ${count} results${count === limit ? ' (limited)' : ''}.`;
+                    const startRange = offset + 1;
+                    const endRange = offset + count;
+                    info.innerText = `Showing results ${startRange} - ${endRange} out of ${totalResults.toLocaleString()}.`;
+                    updatePaginationUI();
                 } else {
                     info.innerText = "No results found.";
+                    totalResults = 0;
+                    updatePaginationUI();
                 }
 
             } catch (err) {
@@ -210,6 +346,12 @@
         }
 
         // Initialize when the page loads
+        // performSearch was called directly before, we use executeSearch now
+        function performSearch() {
+            currentSearchQuery = document.getElementById('searchInput').value.trim();
+            currentPage = 1;
+            executeSearch();
+        }
         window.onload = initDB;
     </script>
 </body>

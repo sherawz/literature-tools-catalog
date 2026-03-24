@@ -99,6 +99,12 @@ func ingestData(db *sql.DB, filePath string) error {
 	}
 	defer stmt.Close()
 
+	// Skip the header row
+	_, err = reader.Read()
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("could not read header row: %w", err)
+	}
+
 	count := 0
 	for {
 		record, err := reader.Read()
