@@ -16,7 +16,7 @@ As a starting point, we are building a foundation to ingest metadata from Europe
 We are currently working with a random subset of the PMID <> PMCID <> DOI map downloaded from EuropePMC.
 
 ### TODOs
-1. Implement advanced client-side database querying techniques (like HTTP Range requests for partial database loading) to handle extremely large datasets without overwhelming the browser.
+1. WIP SheraWZ: Implement advanced client-side database querying techniques (like HTTP Range requests for partial database loading) to handle extremely large datasets without overwhelming the browser.
 
 ## Full Project Plan
 
