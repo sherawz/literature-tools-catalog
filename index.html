@@ -114,18 +114,19 @@
         <button id="nextButton" onclick="changePage(1)" disabled>Next</button>
     </div>
 
-    <script type="module">
-        import { createDbWorker } from "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/index.js";
-
+    <script src="https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/index.js"></script>
+    <script>
         let worker;
         let currentPage = 1;
         const limit = 50;
 
         const workerUrl = new URL(
-            "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/sqlite.worker.js"
+            "sqlite.worker.js",
+            window.location.href
         );
         const wasmUrl = new URL(
-            "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/sql-wasm.wasm"
+            "sql-wasm.wasm",
+            window.location.href
         );
 
         window.changePage = function(delta) {
