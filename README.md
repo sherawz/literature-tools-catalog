@@ -11,7 +11,7 @@ Eventually, this catalog will be expanded to include:
 
 ## Current Milestone (Phase 1)
 
-As a starting point, we are building a foundation to ingest metadata from Europe PMC and PubMed, convert it into a SQLite database using a Go program, and allow browsing/searching of the catalog from a web page using JavaScript.
+As a starting point, we are building a foundation to ingest metadata from Europe PMC and PubMed, convert it into a SQLite database using a Go program, and allow browsing/searching of the catalog from a web page using JavaScript. cf. [GitHub Pages](https://sherawz.github.io/literature-tools-catalog/)
 
 We are currently working with a random subset of the PMID <> PMCID <> DOI map downloaded from EuropePMC.
 
