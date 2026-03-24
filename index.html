@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Literature Tools Catalog</title>
-    <!-- Use sql.js from CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <!-- We will load sql.js-httpvfs via ES modules below -->
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -41,6 +40,10 @@
         button:hover {
             background-color: #0056b3;
         }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -70,15 +73,10 @@
             color: #666;
         }
         #pagination {
-            margin-top: 20px;
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            justify-content: center;
-            gap: 15px;
-        }
-        #pagination button:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
+            margin-top: 20px;
         }
     </style>
 </head>
@@ -116,10 +114,24 @@
         <button id="nextButton" onclick="changePage(1)" disabled>Next</button>
     </div>
 
-    <script>
-        let db;
+    <script type="module">
+        import { createDbWorker } from "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/index.js";
+
+        let worker;
         let currentPage = 1;
         const limit = 50;
+
+        const workerUrl = new URL(
+            "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/sqlite.worker.js"
+        );
+        const wasmUrl = new URL(
+            "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/sql-wasm.wasm"
+        );
+
+        window.changePage = function(delta) {
+            currentPage += delta;
+            window.performSearch(false);
+        };
 
         async function initDB() {
             const loadingIndicator = document.getElementById('loading');
@@ -128,23 +140,22 @@
             const searchButton = document.getElementById('searchButton');
 
             try {
-                // Initialize sql.js
-                const SQL = await initSqlJs({
-                    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
-                });
+                loadingIndicator.innerText = "Initializing remote database connection...";
 
-                // Fetch the SQLite database file
-                loadingIndicator.innerText = "Downloading database... (this might take a moment depending on the size)";
-                const response = await fetch('catalog.db');
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch database: ${response.statusText}`);
-                }
+                const config = {
+                    from: "inline",
+                    config: {
+                        serverMode: "full",
+                        requestChunkSize: 1024,
+                        url: "catalog.db"
+                    }
+                };
 
-                const buffer = await response.arrayBuffer();
-                loadingIndicator.innerText = "Loading database into memory...";
-
-                // Initialize the database
-                db = new SQL.Database(new Uint8Array(buffer));
+                worker = await createDbWorker(
+                    [config],
+                    workerUrl.toString(),
+                    wasmUrl.toString()
+                );
 
                 // Ready
                 loadingIndicator.style.display = 'none';
@@ -153,7 +164,7 @@
                 searchInput.focus();
 
                 // Initial empty search to show some records
-                performSearch();
+                window.performSearch(true);
 
             } catch (err) {
                 console.error(err);
@@ -165,12 +176,17 @@
         // Allow pressing Enter in the search box
         document.getElementById("searchInput").addEventListener("keyup", function(event) {
             if (event.key === "Enter") {
-                performSearch(true);
+                window.performSearch(true);
             }
         });
 
-        function performSearch(resetPage = false) {
-            if (!db) return;
+        // Expose performSearch to global scope for the buttons
+        window.performSearch = async function(resetPage = false) {
+            if (!worker) return;
+
+            if (resetPage) {
+                currentPage = 1;
+            }
 
             if (resetPage) {
                 currentPage = 1;
@@ -193,69 +209,77 @@
             try {
                 let sqlQuery = "";
                 let countQuery = "";
-                let stmt;
-                let countStmt;
+                let params = [];
+                let countParams = [];
                 let totalRecords = 0;
                 const offset = (currentPage - 1) * limit;
 
                 if (queryText === "") {
                     // Count total records
                     countQuery = "SELECT COUNT(*) as count FROM literature";
-                    countStmt = db.prepare(countQuery);
-                    if (countStmt.step()) totalRecords = countStmt.getAsObject().count;
-                    countStmt.free();
 
                     // Show records with pagination
                     sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature LIMIT ? OFFSET ?";
-                    stmt = db.prepare(sqlQuery);
-                    stmt.bind([limit, offset]);
+                    params = [limit, offset];
                 } else {
                     const searchPattern = `%${queryText}%`;
 
                     // Count total records for search
                     countQuery = "SELECT COUNT(*) as count FROM literature WHERE pmid LIKE ? OR pmcid LIKE ? OR doi LIKE ?";
-                    countStmt = db.prepare(countQuery);
-                    countStmt.bind([searchPattern, searchPattern, searchPattern]);
-                    if (countStmt.step()) totalRecords = countStmt.getAsObject().count;
-                    countStmt.free();
+                    countParams = [searchPattern, searchPattern, searchPattern];
 
                     // Search in any column with pagination
                     sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature WHERE pmid LIKE ? OR pmcid LIKE ? OR doi LIKE ? LIMIT ? OFFSET ?";
-                    stmt = db.prepare(sqlQuery);
-                    stmt.bind([searchPattern, searchPattern, searchPattern, limit, offset]);
+                    params = [searchPattern, searchPattern, searchPattern, limit, offset];
                 }
 
+                // worker.db.exec returns an array of results
+                const countResults = await worker.db.exec(countQuery, countParams);
+                if (countResults.length > 0) {
+                    totalRecords = countResults[0].values[0][0];
+                }
+
+                const results = await worker.db.exec(sqlQuery, params);
                 let count = 0;
-                while (stmt.step()) {
-                    const row = stmt.getAsObject();
-                    const tr = document.createElement('tr');
 
-                    const tdId = document.createElement('td');
-                    tdId.textContent = row.id;
-                    tr.appendChild(tdId);
+                if (results.length > 0) {
+                    const columns = results[0].columns;
+                    const values = results[0].values;
 
-                    const tdPmid = document.createElement('td');
-                    tdPmid.textContent = row.pmid || '';
-                    tr.appendChild(tdPmid);
+                    for (const rowVals of values) {
+                        const row = {};
+                        for (let i = 0; i < columns.length; i++) {
+                            row[columns[i]] = rowVals[i];
+                        }
 
-                    const tdPmcid = document.createElement('td');
-                    tdPmcid.textContent = row.pmcid || '';
-                    tr.appendChild(tdPmcid);
+                        const tr = document.createElement('tr');
 
-                    const tdDoi = document.createElement('td');
-                    if (row.doi) {
-                        const a = document.createElement('a');
-                        a.href = row.doi;
-                        a.target = "_blank";
-                        a.textContent = row.doi;
-                        tdDoi.appendChild(a);
+                        const tdId = document.createElement('td');
+                        tdId.textContent = row.id;
+                        tr.appendChild(tdId);
+
+                        const tdPmid = document.createElement('td');
+                        tdPmid.textContent = row.pmid || '';
+                        tr.appendChild(tdPmid);
+
+                        const tdPmcid = document.createElement('td');
+                        tdPmcid.textContent = row.pmcid || '';
+                        tr.appendChild(tdPmcid);
+
+                        const tdDoi = document.createElement('td');
+                        if (row.doi) {
+                            const a = document.createElement('a');
+                            a.href = row.doi;
+                            a.target = "_blank";
+                            a.textContent = row.doi;
+                            tdDoi.appendChild(a);
+                        }
+                        tr.appendChild(tdDoi);
+
+                        tbody.appendChild(tr);
+                        count++;
                     }
-                    tr.appendChild(tdDoi);
-
-                    tbody.appendChild(tr);
-                    count++;
                 }
-                stmt.free();
 
                 if (totalRecords > 0) {
                     table.style.display = 'table';
@@ -277,7 +301,7 @@
                 console.error(err);
                 info.innerText = `Search error: ${err.message}`;
             }
-        }
+        };
 
         function changePage(delta) {
             currentPage += delta;

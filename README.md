@@ -29,7 +29,7 @@ We are currently working with a random subset of the PMID <> PMCID <> DOI map do
 3. **Frontend Web Interface**:
    - A static web page with JavaScript that loads and queries the SQLite database on-demand using WebAssembly (`sql.js`).
    - Enables users to performanty search the catalog entirely client-side, reducing server infrastructure needs.
-   - Make the front-end pageable so that we can potentially visit all 400,000 (or 40m entries.) 
+   - Make the front-end pageable so that we can potentially visit all 400,000 (or 40m entries.)
 
 ### Phase 2: Comprehensive Metadata Enrichment
 - Expand the Go ingestion program to fetch additional metadata (titles, authors, abstracts, publication dates) from Europe PMC and PubMed APIs for the ingested IDs.
