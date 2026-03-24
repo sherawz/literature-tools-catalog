@@ -188,6 +188,10 @@
                 currentPage = 1;
             }
 
+            if (resetPage) {
+                currentPage = 1;
+            }
+
             const queryText = document.getElementById('searchInput').value.trim();
             const tbody = document.querySelector('#resultsTable tbody');
             const table = document.getElementById('resultsTable');
@@ -298,6 +302,11 @@
                 info.innerText = `Search error: ${err.message}`;
             }
         };
+
+        function changePage(delta) {
+            currentPage += delta;
+            performSearch(false);
+        }
 
         // Initialize when the page loads
         window.onload = initDB;
