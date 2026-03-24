@@ -15,6 +15,10 @@ As a starting point, we are building a foundation to ingest metadata from Europe
 
 We are currently working with a random subset of the PMID <> PMCID <> DOI map downloaded from EuropePMC.
 
+### TODOs
+1. Implement advanced client-side database querying techniques (like HTTP Range requests for partial database loading) to handle extremely large datasets without overwhelming the browser.
+2. Make the front-end pageable so that we can potentially visit all 400,000 (or 40m entries.) 
+
 ## Full Project Plan
 
 ### Phase 1: Foundation and Initial Ingestion (Current)
@@ -45,4 +49,3 @@ We are currently working with a random subset of the PMID <> PMCID <> DOI map do
 ### Phase 5: Scale and Automation
 - Automate the ingestion pipelines to keep the catalog up-to-date with the latest publications and releases.
 - Optimize the database generation process and indexing for scale.
-- Implement advanced client-side database querying techniques (like HTTP Range requests for partial database loading) to handle extremely large datasets without overwhelming the browser.
