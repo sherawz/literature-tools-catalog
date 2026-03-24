@@ -48,6 +48,16 @@ func main() {
 }
 
 func createTable(db *sql.DB) error {
+	// Set PRAGMA values for sql.js-httpvfs compatibility before table creation
+	pragmaQuery := `
+	PRAGMA journal_mode = delete;
+	PRAGMA page_size = 1024;
+	`
+	_, err := db.Exec(pragmaQuery)
+	if err != nil {
+		return err
+	}
+
 	query := `
 	CREATE TABLE IF NOT EXISTS literature (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +65,7 @@ func createTable(db *sql.DB) error {
 		pmcid TEXT,
 		doi TEXT
 	);`
-	_, err := db.Exec(query)
+	_, err = db.Exec(query)
 	return err
 }
 
@@ -134,6 +144,13 @@ func ingestData(db *sql.DB, filePath string) error {
 	err = tx.Commit()
 	if err != nil {
 		return fmt.Errorf("could not commit transaction: %w", err)
+	}
+
+	// Reorganize database and apply changed page size
+	log.Println("Vacuuming database to apply page size...")
+	_, err = db.Exec("VACUUM;")
+	if err != nil {
+		return fmt.Errorf("could not vacuum database: %w", err)
 	}
 
 	log.Printf("Total %d records inserted.", count)

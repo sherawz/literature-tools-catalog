@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Literature Tools Catalog</title>
-    <!-- Use sql.js from CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <!-- We will load sql.js-httpvfs via ES modules below -->
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -99,8 +98,17 @@
         </tbody>
     </table>
 
-    <script>
-        let db;
+    <script type="module">
+        import { createDbWorker } from "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/index.js";
+
+        let worker;
+
+        const workerUrl = new URL(
+            "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/sqlite.worker.js"
+        );
+        const wasmUrl = new URL(
+            "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/sql-wasm.wasm"
+        );
 
         async function initDB() {
             const loadingIndicator = document.getElementById('loading');
@@ -109,23 +117,22 @@
             const searchButton = document.getElementById('searchButton');
 
             try {
-                // Initialize sql.js
-                const SQL = await initSqlJs({
-                    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
-                });
+                loadingIndicator.innerText = "Initializing remote database connection...";
 
-                // Fetch the SQLite database file
-                loadingIndicator.innerText = "Downloading database... (this might take a moment depending on the size)";
-                const response = await fetch('catalog.db');
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch database: ${response.statusText}`);
-                }
+                const config = {
+                    from: "inline",
+                    config: {
+                        serverMode: "full",
+                        requestChunkSize: 1024,
+                        url: "catalog.db"
+                    }
+                };
 
-                const buffer = await response.arrayBuffer();
-                loadingIndicator.innerText = "Loading database into memory...";
-
-                // Initialize the database
-                db = new SQL.Database(new Uint8Array(buffer));
+                worker = await createDbWorker(
+                    [config],
+                    workerUrl.toString(),
+                    wasmUrl.toString()
+                );
 
                 // Ready
                 loadingIndicator.style.display = 'none';
@@ -150,8 +157,11 @@
             }
         });
 
-        function performSearch() {
-            if (!db) return;
+        // Search button click
+        document.getElementById("searchButton").addEventListener("click", performSearch);
+
+        async function performSearch() {
+            if (!worker) return;
 
             const queryText = document.getElementById('searchInput').value.trim();
             const tbody = document.querySelector('#resultsTable tbody');
@@ -164,37 +174,63 @@
 
             try {
                 let sqlQuery = "";
-                let stmt;
+                let params = [];
                 const limit = 50;
 
                 if (queryText === "") {
                     // Show top N records if no search query
                     sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature LIMIT ?";
-                    stmt = db.prepare(sqlQuery);
-                    stmt.bind([limit]);
+                    params = [limit];
                 } else {
                     // Search in any column
                     sqlQuery = "SELECT id, pmid, pmcid, doi FROM literature WHERE pmid LIKE ? OR pmcid LIKE ? OR doi LIKE ? LIMIT ?";
                     const searchPattern = `%${queryText}%`;
-                    stmt = db.prepare(sqlQuery);
-                    stmt.bind([searchPattern, searchPattern, searchPattern, limit]);
+                    params = [searchPattern, searchPattern, searchPattern, limit];
                 }
 
+                // worker.db.exec returns an array of results, just like sql.js
+                // It returns an array of objects: { columns: [...], values: [[...], [...]] }
+                const results = await worker.db.exec(sqlQuery, params);
                 let count = 0;
-                while (stmt.step()) {
-                    const row = stmt.getAsObject();
-                    const tr = document.createElement('tr');
 
-                    tr.innerHTML = `
-                        <td>${row.id}</td>
-                        <td>${row.pmid || ''}</td>
-                        <td>${row.pmcid || ''}</td>
-                        <td>${row.doi ? `<a href="${row.doi}" target="_blank">${row.doi}</a>` : ''}</td>
-                    `;
-                    tbody.appendChild(tr);
-                    count++;
+                if (results.length > 0) {
+                    const columns = results[0].columns;
+                    const values = results[0].values;
+
+                    for (const rowVals of values) {
+                        const row = {};
+                        for (let i = 0; i < columns.length; i++) {
+                            row[columns[i]] = rowVals[i];
+                        }
+
+                        const tr = document.createElement('tr');
+                        const idTd = document.createElement('td');
+                        idTd.textContent = row.id;
+
+                        const pmidTd = document.createElement('td');
+                        pmidTd.textContent = row.pmid || '';
+
+                        const pmcidTd = document.createElement('td');
+                        pmcidTd.textContent = row.pmcid || '';
+
+                        const doiTd = document.createElement('td');
+                        if (row.doi) {
+                            const a = document.createElement('a');
+                            a.href = row.doi;
+                            a.target = "_blank";
+                            a.textContent = row.doi;
+                            doiTd.appendChild(a);
+                        }
+
+                        tr.appendChild(idTd);
+                        tr.appendChild(pmidTd);
+                        tr.appendChild(pmcidTd);
+                        tr.appendChild(doiTd);
+
+                        tbody.appendChild(tr);
+                        count++;
+                    }
                 }
-                stmt.free();
 
                 if (count > 0) {
                     table.style.display = 'table';
