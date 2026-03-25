@@ -156,21 +156,22 @@
 
                 // Fetch the database length to avoid "Length of the file not known" errors
                 let dbLength = 0;
-                let response = await fetch(dbUrl, { method: "HEAD" });
 
-                if (response.ok && response.headers.has("Content-Length")) {
-                    dbLength = parseInt(response.headers.get("Content-Length"), 10);
-                } else {
-                    // Fallback to a range request if HEAD doesn't work (e.g. GitHub pages gzip)
-                    response = await fetch(dbUrl, {
-                        headers: { "Range": "bytes=0-0" }
-                    });
-                    if (response.ok && response.headers.has("Content-Range")) {
-                        const contentRange = response.headers.get("Content-Range");
-                        const match = contentRange.match(/\/(\d+)$/);
-                        if (match && match[1]) {
-                            dbLength = parseInt(match[1], 10);
-                        }
+                // GitHub Pages and some other static hosts apply gzip compression to HEAD requests.
+                // The Content-Length returned is the compressed size, which breaks sql.js-httpvfs
+                // because it requires the exact uncompressed byte length for Range requests.
+                // However, browser fetch APIs often hide the Content-Encoding header transparently.
+                // To guarantee we get the true uncompressed file size, we must always perform a
+                // 1-byte Range request instead of a HEAD request.
+                let response = await fetch(dbUrl, {
+                    headers: { "Range": "bytes=0-0" }
+                });
+
+                if (response.ok && response.headers.has("Content-Range")) {
+                    const contentRange = response.headers.get("Content-Range");
+                    const match = contentRange.match(/\/(\d+)$/);
+                    if (match && match[1]) {
+                        dbLength = parseInt(match[1], 10);
                     }
                 }
 
