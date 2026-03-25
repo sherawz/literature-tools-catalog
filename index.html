@@ -114,19 +114,18 @@
         <button id="nextButton" onclick="changePage(1)" disabled>Next</button>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/index.js"></script>
-    <script>
+    <script type="module">
+        import { createDbWorker } from "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/index.js";
+
         let worker;
         let currentPage = 1;
         const limit = 50;
 
         const workerUrl = new URL(
-            "sqlite.worker.js",
-            window.location.href
+            "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/sqlite.worker.js"
         );
         const wasmUrl = new URL(
-            "sql-wasm.wasm",
-            window.location.href
+            "https://cdn.jsdelivr.net/npm/sql.js-httpvfs@0.8.12/dist/sql-wasm.wasm"
         );
 
         window.changePage = function(delta) {
@@ -143,12 +142,34 @@
             try {
                 loadingIndicator.innerText = "Initializing remote database connection...";
 
+                // Fetch the exact file size to avoid "Length of the file not known" errors
+                // when GitHub Pages compresses the response and strips Content-Length.
+                const dbSizeResponse = await fetch("catalog.db", { method: "HEAD" });
+                let dbSize = dbSizeResponse.headers.get("content-length");
+
+                // Fallback to getting it via a small GET request if HEAD is blocked or stripped
+                if (!dbSize) {
+                     const fallbackResponse = await fetch("catalog.db", {
+                        headers: { "Range": "bytes=0-0" }
+                     });
+                     const contentRange = fallbackResponse.headers.get("content-range");
+                     if (contentRange) {
+                         const match = contentRange.match(/\/(\d+)/);
+                         if (match) dbSize = match[1];
+                     }
+                }
+
+                if (!dbSize) {
+                    throw new Error("Could not determine database file size. Ensure the server exposes the Content-Length or Content-Range header.");
+                }
+
                 const config = {
                     from: "inline",
                     config: {
                         serverMode: "full",
                         requestChunkSize: 1024,
-                        url: "catalog.db"
+                        url: "catalog.db",
+                        length: parseInt(dbSize, 10)
                     }
                 };
 
