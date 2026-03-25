@@ -143,12 +143,37 @@
             try {
                 loadingIndicator.innerText = "Initializing remote database connection...";
 
+                // Fetch the database length to avoid "Length of the file not known" errors
+                let dbLength = 0;
+                let response = await fetch("catalog.db", { method: "HEAD" });
+
+                if (response.ok && response.headers.has("Content-Length")) {
+                    dbLength = parseInt(response.headers.get("Content-Length"), 10);
+                } else {
+                    // Fallback to a range request if HEAD doesn't work (e.g. GitHub pages gzip)
+                    response = await fetch("catalog.db", {
+                        headers: { "Range": "bytes=0-0" }
+                    });
+                    if (response.ok && response.headers.has("Content-Range")) {
+                        const contentRange = response.headers.get("Content-Range");
+                        const match = contentRange.match(/\/(\d+)$/);
+                        if (match && match[1]) {
+                            dbLength = parseInt(match[1], 10);
+                        }
+                    }
+                }
+
+                if (dbLength === 0) {
+                     throw new Error("Could not determine the length of catalog.db.");
+                }
+
                 const config = {
                     from: "inline",
                     config: {
                         serverMode: "full",
                         requestChunkSize: 1024,
-                        url: "catalog.db"
+                        url: "catalog.db",
+                        length: dbLength
                     }
                 };
 
