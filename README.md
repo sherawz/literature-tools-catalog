@@ -30,10 +30,15 @@ To accelerate development, the implementation of this new architecture has been 
 ### Track 1: Data Ingestion (Go)
 The existing `ingest.go` logic needs to be factored out into four separate ingestion programs that will eventually live in an `ingestion/` directory.
 
-- [ ] **TODO:** Rename the current `ingest.go` to `ingestion/ingest_literature.go` and update it to specifically output `literature.db` instead of `catalog.db`.
+- [x] **TODO:** Rename the current `ingest.go` to `ingestion/ingest_literature.go` and update it to specifically output `literature.db` instead of `catalog.db`.
 - [ ] **TODO:** Create a stub Go program `ingestion/ingest_ai_weights.go` that outputs a basic schema for AI Weights.
 - [ ] **TODO:** Create a stub Go program `ingestion/ingest_cohorts.go` that outputs a basic schema for Human Cohorts.
 - [ ] **TODO:** Create a stub Go program `ingestion/ingest_tools_materials.go` that outputs a basic schema for Tools and Materials.
+
+**Implementation Notes:**
+* Created `ingestion/` directory with subdirectories for `literature/`, `ai_weights/`, `cohorts/`, and `tools_materials/`.
+* Ran `ingest_literature.go` and its test CSV file to output `literature.db`.
+* We might want to expand these basic schemas with more domain-specific columns as more specific datasets are incorporated.
 
 ### Track 2: Backend API (Go)
 The backend server needs to be built from scratch to mount the generated databases.
